@@ -109,4 +109,4 @@ sh tests/e2e.sh            # end-to-end tests with local git repositories
 
 ## License
 
-[MIT License](LICENSE)
+[GNU General Public License v3.0](LICENSE)
