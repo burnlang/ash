@@ -1,0 +1,300 @@
+import "fs"
+import "toml.bn"
+import "paths.bn"
+import "ui.bn"
+
+pub def type Dep {
+    string name
+    string spec
+    string git
+    string path
+}
+
+pub def type Manifest {
+    string root
+    string name
+    string version
+    string kind
+    string target
+    string main
+    string description
+    [Dep] deps
+    [string] scriptNames
+    {string: string} scripts
+}
+
+pub def type LockEntry {
+    string name
+    string version
+    string rev
+    string source
+    [string] deps
+}
+
+pub fun validName(name: string): bool {
+    var parts = split(name, "/")
+    if (len(parts) != 3) {
+        return false
+    }
+    var labels = split(parts[0], ".")
+    if (len(labels) < 2) {
+        return false
+    }
+    for (l in labels) {
+        if (l == "" || startsWith(l, "-") || lower(l) != l) {
+            return false
+        }
+        for (ch in chars(l)) {
+            if (!isAlphanumeric(ch) && ch != "-") {
+                return false
+            }
+        }
+    }
+    if (!isLetter(labels[len(labels) - 1])) {
+        return false
+    }
+    for (seg in slice(parts, 1)) {
+        if (seg == "" || startsWith(seg, ".")) {
+            return false
+        }
+        for (ch in chars(seg)) {
+            if (!isAlphanumeric(ch) && ch != "-" && ch != "_" && ch != ".") {
+                return false
+            }
+        }
+    }
+    return true
+}
+
+pub fun nameHelp(): string {
+    return "package names say where the code lives, like `github.com/owner/project`"
+}
+
+pub fun gitUrl(dep: Dep): string {
+    if (dep.git != "") {
+        return dep.git
+    }
+    return "https://" + dep.name
+}
+
+priv fun check(doc: TomlDoc, file: string) {
+    if (doc.error != "") {
+        die("${file}: " + doc.error, "")
+    }
+}
+
+pub fun parseManifest(text: string, root: string, file: string): Manifest {
+    var doc = tomlParse(text)
+    check(doc, file)
+    var pkg = tomlTable(doc, "package")
+    if (pkg == null) {
+        die("${file} has no [package] section", "start it with [package] and a `name = \"github.com/you/project\"` line")
+    }
+    var m = Manifest {
+        root: root,
+        name: tomlText(pkg, "name", ""),
+        version: tomlText(pkg, "version", "0.1.0"),
+        kind: tomlText(pkg, "kind", "app"),
+        target: tomlText(pkg, "target", "native"),
+        main: tomlText(pkg, "main", ""),
+        description: tomlText(pkg, "description", ""),
+        deps: [],
+        scriptNames: [],
+        scripts: {}
+    }
+    if (!validName(m.name)) {
+        die("${file}: `${m.name}` is not a valid package name", nameHelp())
+    }
+    if (m.kind != "app" && m.kind != "lib") {
+        die("${file}: unknown kind `${m.kind}`", "use kind = \"app\" or kind = \"lib\"")
+    }
+    if (m.main == "") {
+        if (m.kind == "lib") {
+            m.main = "src/lib.bn"
+        } else {
+            m.main = "src/main.bn"
+        }
+    }
+    var deps = tomlTable(doc, "dependencies")
+    if (deps != null) {
+        for (e in deps.entries) {
+            var d = Dep { name: e.key, spec: "*", git: "", path: "" }
+            if (e.value.kind == "string") {
+                d.spec = e.value.text
+            } else if (e.value.kind == "table") {
+                d.spec = e.value.fields["version"] ?? "*"
+                d.git = e.value.fields["git"] ?? ""
+                d.path = e.value.fields["path"] ?? ""
+            } else {
+                die("${file}:${e.line}: the dependency `${e.key}` needs a version in quotes", "for example \"${e.key}\" = \"^1.0\"")
+            }
+            if (!validName(d.name)) {
+                die("${file}:${e.line}: `${d.name}` is not a valid package name", nameHelp())
+            }
+            m.deps.push(d)
+        }
+    }
+    var scripts = tomlTable(doc, "scripts")
+    if (scripts != null) {
+        for (e in scripts.entries) {
+            if (e.value.kind != "string") {
+                die("${file}:${e.line}: the script `${e.key}` must be a command in quotes", "")
+            }
+            m.scriptNames.push(e.key)
+            m.scripts[e.key] = e.value.text
+        }
+    }
+    return m
+}
+
+pub fun readManifest(root: string): Manifest {
+    var file = root + "/burn.toml"
+    if (!Files.isFile(file)) {
+        die("there is no burn.toml in ${root}", "create a project with `ash init github.com/you/project`")
+    }
+    return parseManifest(readFile(file), root, relPath(".", file))
+}
+
+pub fun readLock(root: string): [LockEntry] {
+    var out: [LockEntry] = []
+    var file = root + "/burn.lock"
+    if (!Files.isFile(file)) {
+        return out
+    }
+    var doc = tomlParse(readFile(file))
+    check(doc, "burn.lock")
+    for (t in tomlTables(doc, "package")) {
+        var entry = LockEntry {
+            name: tomlText(t, "name", ""),
+            version: tomlText(t, "version", ""),
+            rev: tomlText(t, "rev", ""),
+            source: tomlText(t, "source", ""),
+            deps: tomlGet(t, "dependencies")?.items ?? []
+        }
+        out.push(entry)
+    }
+    return out
+}
+
+pub fun findLocked(lock: [LockEntry], name: string): LockEntry? {
+    for (e in lock) {
+        if (e.name == name) {
+            return e
+        }
+    }
+    return null
+}
+
+pub fun lockText(entries: [LockEntry]): string {
+    var names: [string] = []
+    for (e in entries) {
+        names.push(e.name)
+    }
+    sort(names)
+    var out = "version = 1\n"
+    for (n in names) {
+        var e = findLocked(entries, n)!!
+        var deps = copy(e.deps)
+        sort(deps)
+        out = out + "\n[[package]]\n"
+        out = out + "name = " + tomlQuote(e.name) + "\n"
+        out = out + "version = " + tomlQuote(e.version) + "\n"
+        out = out + "rev = " + tomlQuote(e.rev) + "\n"
+        out = out + "source = " + tomlQuote(e.source) + "\n"
+        out = out + "dependencies = " + tomlList(deps) + "\n"
+    }
+    return out
+}
+
+pub fun writeLock(root: string, entries: [LockEntry]) {
+    var text = lockText(entries)
+    var file = root + "/burn.lock"
+    if (Files.isFile(file) && readFile(file) == text) {
+        return
+    }
+    if (!writeFile(file, text)) {
+        die("cannot write ${file}", "")
+    }
+}
+
+priv fun isHeader(line: string): bool {
+    return startsWith(trim(line), "[")
+}
+
+priv fun lineKey(line: string): string {
+    var t = trim(line)
+    if (startsWith(t, "\"")) {
+        var rest = substring(t, 1)
+        var end = indexOf(rest, "\"")
+        if (end < 0) {
+            return ""
+        }
+        return substring(rest, 0, end)
+    }
+    var eq = indexOf(t, "=")
+    if (eq < 0) {
+        return ""
+    }
+    return trim(substring(t, 0, eq))
+}
+
+pub fun editDependencies(text: string, name: string, value: string): string {
+    var lines = split(text, "\n")
+    var start = -1
+    for i, l in lines {
+        if (trim(l) == "[dependencies]") {
+            start = i
+        }
+    }
+    var entry = tomlQuote(name) + " = " + value
+    if (start < 0) {
+        if (value == "") {
+            return text
+        }
+        var out = text
+        if (!endsWith(out, "\n")) {
+            out = out + "\n"
+        }
+        return out + "\n[dependencies]\n" + entry + "\n"
+    }
+    var end = len(lines)
+    for (i in start + 1..len(lines)) {
+        if (isHeader(lines[i])) {
+            end = i
+            break
+        }
+    }
+    var result: [string] = []
+    var done = false
+    var lastEntry = start
+    for (i in start + 1..end) {
+        var t = trim(lines[i])
+        if (t != "" && !startsWith(t, "#")) {
+            lastEntry = i
+        }
+    }
+    for i, l in lines {
+        if (i > start && i < end && lineKey(l) == name && !startsWith(trim(l), "#")) {
+            if (value != "") {
+                result.push(entry)
+            }
+            done = true
+            continue
+        }
+        result.push(l)
+        if (i == lastEntry && !done && value != "") {
+            result.push(entry)
+            done = true
+        }
+    }
+    return join(result, "\n")
+}
+
+pub fun setDependency(root: string, name: string, value: string) {
+    var file = root + "/burn.toml"
+    var text = readFile(file)
+    var updated = editDependencies(text, name, value)
+    if (updated != text && !writeFile(file, updated)) {
+        die("cannot write ${file}", "")
+    }
+}

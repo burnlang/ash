@@ -1,0 +1,147 @@
+pub def type Version {
+    int major
+    int minor
+    int patch
+    string pre
+    int parts
+    bool ok
+}
+
+pub def type Spec {
+    string kind
+    Version base
+    string text
+}
+
+pub fun parseVersion(text: string): Version {
+    var t = trim(text)
+    if (startsWith(t, "v") || startsWith(t, "V")) {
+        t = substring(t, 1)
+    }
+    var pre = ""
+    var dash = indexOf(t, "-")
+    if (dash >= 0) {
+        pre = substring(t, dash + 1)
+        t = substring(t, 0, dash)
+    }
+    var bad = Version { major: 0, minor: 0, patch: 0, pre: "", parts: 0, ok: false }
+    var nums = split(t, ".")
+    if (t == "" || len(nums) > 3) {
+        return bad
+    }
+    var vals = [0, 0, 0]
+    for i, n in nums {
+        if (n == "" || !isDigit(n)) {
+            return bad
+        }
+        vals[i] = toInt(n)
+    }
+    return Version { major: vals[0], minor: vals[1], patch: vals[2], pre: pre, parts: len(nums), ok: true }
+}
+
+pub fun formatVersion(v: Version): string {
+    var s = "${v.major}.${v.minor}.${v.patch}"
+    if (v.pre != "") {
+        s = s + "-" + v.pre
+    }
+    return s
+}
+
+priv fun order(less: bool): int {
+    if (less) {
+        return -1
+    }
+    return 1
+}
+
+pub fun compareVersions(a: Version, b: Version): int {
+    if (a.major != b.major) {
+        return order(a.major < b.major)
+    }
+    if (a.minor != b.minor) {
+        return order(a.minor < b.minor)
+    }
+    if (a.patch != b.patch) {
+        return order(a.patch < b.patch)
+    }
+    if (a.pre == b.pre) {
+        return 0
+    }
+    if (a.pre == "") {
+        return 1
+    }
+    if (b.pre == "") {
+        return -1
+    }
+    return order(a.pre < b.pre)
+}
+
+pub fun parseSpec(text: string): Spec {
+    var t = trim(text)
+    var none = Version { major: 0, minor: 0, patch: 0, pre: "", parts: 0, ok: false }
+    if (t == "" || t == "*" || t == "latest") {
+        return Spec { kind: "any", base: none, text: "*" }
+    }
+    if (startsWith(t, "#")) {
+        return Spec { kind: "rev", base: none, text: substring(t, 1) }
+    }
+    var kind = "caret"
+    var rest = t
+    if (startsWith(t, ">=")) {
+        kind = "atleast"
+        rest = substring(t, 2)
+    } else if (startsWith(t, "^")) {
+        rest = substring(t, 1)
+    } else if (startsWith(t, "~")) {
+        kind = "tilde"
+        rest = substring(t, 1)
+    } else if (startsWith(t, "=")) {
+        kind = "exact"
+        rest = substring(t, 1)
+    }
+    var v = parseVersion(rest)
+    if (!v.ok) {
+        return Spec { kind: "branch", base: none, text: t }
+    }
+    return Spec { kind: kind, base: v, text: t }
+}
+
+pub fun specAllows(spec: Spec, v: Version): bool {
+    if (spec.kind == "any") {
+        return v.ok && v.pre == ""
+    }
+    if (!v.ok || spec.kind == "branch" || spec.kind == "rev") {
+        return false
+    }
+    var b = spec.base
+    if (v.pre != "" && (b.pre == "" || v.major != b.major || v.minor != b.minor || v.patch != b.patch)) {
+        return false
+    }
+    var cmp = compareVersions(v, b)
+    if (spec.kind == "exact") {
+        return cmp == 0
+    }
+    if (cmp < 0) {
+        return false
+    }
+    if (spec.kind == "atleast") {
+        return true
+    }
+    if (spec.kind == "tilde") {
+        if (b.parts == 1) {
+            return v.major == b.major
+        }
+        return v.major == b.major && v.minor == b.minor
+    }
+    if (b.major > 0 || b.parts == 1) {
+        return v.major == b.major
+    }
+    if (b.minor > 0 || b.parts == 2) {
+        return v.major == 0 && v.minor == b.minor
+    }
+    return v.major == 0 && v.minor == 0 && v.patch == b.patch
+}
+
+pub fun caretFor(v: Version): string {
+    return "^" + formatVersion(v)
+}

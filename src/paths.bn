@@ -1,0 +1,100 @@
+import "fs"
+import "process"
+
+pub fun parentDir(path: string): string {
+    var p = path
+    while (len(p) > 1 && endsWith(p, "/")) {
+        p = substring(p, 0, len(p) - 1)
+    }
+    var parts = split(p, "/")
+    if (len(parts) <= 1) {
+        return "."
+    }
+    var up = join(slice(parts, 0, len(parts) - 1), "/")
+    if (up == "") {
+        return "/"
+    }
+    return up
+}
+
+pub fun baseName(path: string): string {
+    var parts = split(path, "/")
+    return parts[len(parts) - 1]
+}
+
+pub fun normPath(path: string): string {
+    var absolute = startsWith(path, "/")
+    var out: [string] = []
+    for (part in split(path, "/")) {
+        if (part == "" || part == ".") {
+            continue
+        }
+        if (part == ".." && len(out) > 0 && out[len(out) - 1] != "..") {
+            out.pop()
+        } else if (part != ".." || !absolute) {
+            out.push(part)
+        }
+    }
+    var joined = join(out, "/")
+    if (absolute) {
+        return "/" + joined
+    }
+    if (joined == "") {
+        return "."
+    }
+    return joined
+}
+
+pub fun absPath(path: string): string {
+    if (startsWith(path, "/")) {
+        return normPath(path)
+    }
+    return normPath(Process.cwd() + "/" + path)
+}
+
+pub fun relPath(from: string, to: string): string {
+    var a = split(normPath(from), "/")
+    var b = split(normPath(to), "/")
+    var i = 0
+    while (i < len(a) && i < len(b) && a[i] == b[i]) {
+        i += 1
+    }
+    var out: [string] = []
+    for (k in i..len(a)) {
+        if (a[k] != "") {
+            out.push("..")
+        }
+    }
+    for (k in i..len(b)) {
+        out.push(b[k])
+    }
+    if (len(out) == 0) {
+        return "."
+    }
+    return join(out, "/")
+}
+
+pub fun findProjectRoot(start: string): string {
+    var dir = absPath(start)
+    while (true) {
+        if (Files.isFile(dir + "/burn.toml")) {
+            return dir
+        }
+        if (dir == "/" || dir == ".") {
+            return ""
+        }
+        dir = parentDir(dir)
+    }
+}
+
+pub fun burnHome(): string {
+    var h = env("BURN_HOME")
+    if (h != "") {
+        return absPath(h)
+    }
+    return env("HOME") + "/.burn"
+}
+
+pub fun shellQuote(text: string): string {
+    return "'" + replace(text, "'", "'\\''") + "'"
+}

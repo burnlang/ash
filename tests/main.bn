@@ -1,0 +1,55 @@
+import "github.com/burnlang/ash/src/toml"
+import "github.com/burnlang/ash/src/semver"
+import "github.com/burnlang/ash/src/manifest"
+import "github.com/burnlang/ash/src/paths"
+
+fun allows(spec: string, version: string): bool {
+    return specAllows(parseSpec(spec), parseVersion(version))
+}
+
+var doc = tomlParse("[package]\nname = \"github.com/a/b\" # the name\n\n[dependencies]\n\"github.com/x/y\" = { version = \"^1\", git = \"file:///tmp/y\" }\n\n[[package]]\nlist = [\"a\",\n  \"b\",\n]\n")
+assert(doc.error == "")
+assert(tomlText(tomlTable(doc, "package"), "name", "") == "github.com/a/b")
+assert(tomlGet(tomlTable(doc, "dependencies"), "github.com/x/y")!!.fields["git"] == "file:///tmp/y")
+assert(tomlGet(tomlTables(doc, "package")[0], "list")?.items == ["a", "b"])
+assert(contains(tomlParse("a = hello\n").error, "put text in quotes"))
+assert(contains(tomlParse("a = 1\na = 2\n").error, "set twice"))
+
+assert(allows("^1.2", "v1.9.0"))
+assert(!allows("^1.2", "2.0.0"))
+assert(!allows("^1.2", "1.1.0"))
+assert(allows("^0.2", "0.2.5"))
+assert(!allows("^0.2", "0.3.0"))
+assert(allows("~1.2", "1.2.9"))
+assert(!allows("~1.2", "1.3.0"))
+assert(allows("*", "4.0.0"))
+assert(!allows("*", "4.0.0-beta"))
+assert(allows("=1.0.0", "1.0.0"))
+assert(allows(">=1.5", "3.0.0"))
+assert(parseSpec("main").kind == "branch")
+assert(parseSpec("#abc123").kind == "rev")
+assert(compareVersions(parseVersion("1.0.0-rc.1"), parseVersion("1.0.0")) < 0)
+
+assert(validName("github.com/S42yt/app"))
+assert(!validName("app"))
+assert(!validName("GitHub.com/a/b"))
+assert(!validName("github.com/a"))
+
+var toml = "[package]\nname = \"github.com/a/b\"\n\n[dependencies]\n\"github.com/x/y\" = \"^1.0\"\n\n[scripts]\ndev = \"x\"\n"
+var added = editDependencies(toml, "github.com/z/w", "\"^2.0\"")
+assert(contains(added, "\"github.com/x/y\" = \"^1.0\"\n\"github.com/z/w\" = \"^2.0\"\n\n[scripts]"))
+var replaced = editDependencies(added, "github.com/x/y", "\"^1.5\"")
+assert(contains(replaced, "\"github.com/x/y\" = \"^1.5\""))
+assert(!contains(editDependencies(added, "github.com/x/y", ""), "github.com/x/y"))
+assert(contains(editDependencies("[package]\nname = \"github.com/a/b\"\n", "github.com/q/r", "\"*\""), "\n[dependencies]\n\"github.com/q/r\" = \"*\"\n"))
+
+assert(normPath("/a/b/../c/./d") == "/a/c/d")
+assert(relPath("/a/b", "/a/c/d") == "../c/d")
+assert(parentDir("/a/b/c") == "/a/b")
+
+var lock = [LockEntry { name: "github.com/b/b", version: "v1.0.0", rev: "abc", source: "git+https://github.com/b/b", deps: [] }, LockEntry { name: "github.com/a/a", version: "0.1.0", rev: "", source: "path+../a", deps: ["github.com/b/b"] }]
+var text = lockText(lock)
+assert(indexOf(text, "github.com/a/a") < indexOf(text, "github.com/b/b"))
+assert(contains(text, "dependencies = [\"github.com/b/b\"]"))
+
+print("ash unit tests passed")
