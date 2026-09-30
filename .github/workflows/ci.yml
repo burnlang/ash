@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build Burn
+        run: |
+          git clone --depth 1 https://github.com/burnlang/burn "$RUNNER_TEMP/burn"
+          cargo build --release --manifest-path "$RUNNER_TEMP/burn/Cargo.toml"
+          mkdir -p "$RUNNER_TEMP/bin"
+          for tool in burn burni burnc; do ln -sf "$RUNNER_TEMP/burn/target/release/burn" "$RUNNER_TEMP/bin/$tool"; done
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      - run: burn fmt --check src/*.bn tests/*.bn
+      - run: burn check
+      - run: burn run tests/main.bn
+      - run: burn build
+      - name: End-to-end tests
+        run: ASH="$PWD/build/ash" sh tests/e2e.sh
+      - name: End-to-end tests on the interpreter
+        run: sh tests/e2e.sh

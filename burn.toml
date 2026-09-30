@@ -1,0 +1,13 @@
+[package]
+name = "github.com/burnlang/ash"
+version = "0.1.0"
+kind = "app"
+target = "native"
+main = "src/main.bn"
+description = "The Burn package manager"
+
+[dependencies]
+
+[scripts]
+dev = "burni src/main.bn"
+test = "burni tests/main.bn && sh tests/e2e.sh"

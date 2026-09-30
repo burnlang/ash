@@ -1,0 +1,135 @@
+import "fs"
+import "process"
+import "git.bn"
+import "manifest.bn"
+import "paths.bn"
+import "project.bn"
+import "resolve.bn"
+import "ui.bn"
+
+priv fun shortName(name: string): string {
+    return baseName(name)
+}
+
+priv fun toolDir(name: string): string {
+    return burnHome() + "/tools/" + name
+}
+
+priv fun binDir(): string {
+    return burnHome() + "/bin"
+}
+
+priv fun buildTool(dir: string, m: Manifest): bool {
+    Process.setCwd(dir)
+    if (len(m.deps) > 0) {
+        installAll()
+    }
+    var out = binDir() + "/" + shortName(m.name)
+    Files.makeDir(binDir())
+    step("Building", "${m.name} ${m.version}")
+    var built = Process.output(burnExe(), ["build", "--target", "native", "-o", out + ".new"])
+    if (built.code == 0) {
+        return Files.rename(out + ".new", out)
+    }
+    if (built.code == -1) {
+        die("the `burn` command was not found", "install the Burn toolchain with burnup")
+    }
+    if (!contains(built.err, "linker") && !contains(built.err, "linking") && !contains(built.err, "native")) {
+        eprint(built.out + built.err)
+        die("${m.name} does not build", "")
+    }
+    warn("native compilation is not available here, so ${shortName(m.name)} runs on the interpreter")
+    var shim = "#!/bin/sh\nexec burni " + shellQuote(dir + "/" + m.main) + " \"$@\"\n"
+    if (!writeFile(out, shim)) {
+        return false
+    }
+    return Process.run("chmod", ["+x", out]) == 0
+}
+
+pub fun installTool(r: Request) {
+    var start = nowMs()
+    var dir = ""
+    var version = ""
+    if (r.path != "") {
+        dir = r.path
+    } else {
+        var url = "https://" + r.name
+        if (r.git != "") {
+            url = r.git
+        }
+        var want = Want { name: r.name, spec: r.spec, url: url, path: "", from: "the command line" }
+        var remote = lsRemote(url)
+        if (remote.error != "") {
+            die("cannot reach ${r.name} (${url}): ${remote.error}", "")
+        }
+        var e = chooseVersion(r.name, [want], url)
+        dir = toolDir(r.name)
+        var ref = e.version
+        if (startsWith(e.rev, ref)) {
+            ref = ""
+        }
+        step("Downloading", "${r.name} ${e.version}")
+        var err = download(url, ref, e.rev, dir)
+        if (err != "") {
+            die("cannot download ${r.name}: ${err}", "")
+        }
+        version = e.version
+    }
+    if (!Files.isFile(dir + "/burn.toml")) {
+        die("${r.name} is not a Burn project: it has no burn.toml", "")
+    }
+    var m = readManifest(dir)
+    if (m.kind != "app") {
+        die("${m.name} is a library, so there is no command to install", "add it to a project with `ash install ${m.name}`")
+    }
+    if (!buildTool(dir, m)) {
+        die("cannot install ${shortName(m.name)} into ${binDir()}", "")
+    }
+    if (version == "") {
+        version = m.version
+    }
+    var stamp = burnHome() + "/tools/" + m.name + ".version"
+    Files.makeDir(parentDir(stamp))
+    writeFile(stamp, version)
+    step("Installed", "${m.name} ${version} as ${shortName(m.name)} in ${elapsed(start)}")
+    if (!contains(":" + env("PATH") + ":", ":" + binDir() + ":")) {
+        warn("${binDir()} is not on your PATH")
+    }
+}
+
+pub fun removeTool(name: string) {
+    var short = shortName(name)
+    var bin = binDir() + "/" + short
+    var found = Files.isFile(bin) || Files.isDir(toolDir(name))
+    if (!found) {
+        die("${name} is not installed as a command", "see installed commands with `ash list -g`")
+    }
+    Files.remove(bin)
+    Files.remove(toolDir(name))
+    Files.remove(burnHome() + "/tools/" + name + ".version")
+    step("Removed", "${name} (${short})")
+}
+
+priv fun walkTools(dir: string, prefix: string, out: [string]) {
+    for (n in Files.list(dir)) {
+        if (endsWith(n, ".version")) {
+            out.push(prefix + substring(n, 0, len(n) - 8))
+        } else if (Files.isDir(dir + "/" + n)) {
+            walkTools(dir + "/" + n, prefix + n + "/", out)
+        }
+    }
+}
+
+pub fun listTools() {
+    var names: [string] = []
+    walkTools(burnHome() + "/tools", "", names)
+    if (len(names) == 0) {
+        print(dim("no commands installed; install one with `ash install -g <name>`"))
+        return
+    }
+    sort(names)
+    for (n in names) {
+        var v = trim(readFile(burnHome() + "/tools/" + n + ".version"))
+        print(green(shortName(n)) + "  " + n + " " + cyan(v))
+    }
+}

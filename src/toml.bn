@@ -1,0 +1,347 @@
+pub def type TomlValue {
+    string kind
+    string text
+    [string] items
+    {string: string} fields
+}
+
+pub def type TomlEntry {
+    string key
+    TomlValue value
+    int line
+}
+
+pub def type TomlTable {
+    string name
+    bool isArray
+    [TomlEntry] entries
+}
+
+pub def type TomlDoc {
+    [TomlTable] tables
+    string error
+}
+
+priv def type Cursor {
+    [string] cs
+    int i
+    int line
+    string error
+}
+
+priv fun peek(c: Cursor): string {
+    if (c.i < len(c.cs)) {
+        return c.cs[c.i]
+    }
+    return ""
+}
+
+priv fun fail(c: Cursor, message: string) {
+    if (c.error == "") {
+        c.error = "line ${c.line}: " + message
+    }
+}
+
+priv fun spaces(c: Cursor) {
+    while (peek(c) == " " || peek(c) == "\t") {
+        c.i += 1
+    }
+}
+
+priv fun comment(c: Cursor) {
+    if (peek(c) == "#") {
+        while (c.i < len(c.cs) && peek(c) != "\n") {
+            c.i += 1
+        }
+    }
+}
+
+priv fun blank(c: Cursor) {
+    while (c.error == "") {
+        spaces(c)
+        comment(c)
+        var ch = peek(c)
+        if (ch == "\n") {
+            c.line += 1
+            c.i += 1
+        } else if (ch == "\r") {
+            c.i += 1
+        } else {
+            return
+        }
+    }
+}
+
+priv fun endOfLine(c: Cursor) {
+    spaces(c)
+    comment(c)
+    var ch = peek(c)
+    if (ch != "" && ch != "\n" && ch != "\r") {
+        fail(c, "unexpected `${ch}` after the value")
+    }
+}
+
+priv fun isBare(ch: string): bool {
+    return ch != "" && (isAlphanumeric(ch) || ch == "_" || ch == "-")
+}
+
+priv fun basicString(c: Cursor): string {
+    c.i += 1
+    var out = ""
+    while (c.error == "") {
+        var ch = peek(c)
+        c.i += 1
+        if (ch == "" || ch == "\n") {
+            fail(c, "this text is missing its closing `\"`")
+        } else if (ch == "\"") {
+            return out
+        } else if (ch == "\\") {
+            var e = peek(c)
+            c.i += 1
+            if (e == "n") {
+                out = out + "\n"
+            } else if (e == "t") {
+                out = out + "\t"
+            } else if (e == "\"" || e == "\\") {
+                out = out + e
+            } else {
+                fail(c, "unknown escape `\\${e}`")
+            }
+        } else {
+            out = out + ch
+        }
+    }
+    return out
+}
+
+priv fun literalString(c: Cursor): string {
+    c.i += 1
+    var out = ""
+    while (peek(c) != "'") {
+        var ch = peek(c)
+        if (ch == "" || ch == "\n") {
+            fail(c, "this text is missing its closing `'`")
+            return out
+        }
+        out = out + ch
+        c.i += 1
+    }
+    c.i += 1
+    return out
+}
+
+priv fun key(c: Cursor): string {
+    var ch = peek(c)
+    if (ch == "\"") {
+        return basicString(c)
+    }
+    if (ch == "'") {
+        return literalString(c)
+    }
+    var out = ""
+    while (isBare(peek(c))) {
+        out = out + peek(c)
+        c.i += 1
+    }
+    if (out == "") {
+        fail(c, "expected a name")
+    }
+    return out
+}
+
+priv fun keyPath(c: Cursor): [string] {
+    var path = [key(c)]
+    spaces(c)
+    while (peek(c) == "." && c.error == "") {
+        c.i += 1
+        spaces(c)
+        path.push(key(c))
+        spaces(c)
+    }
+    return path
+}
+
+priv fun scalar(c: Cursor): TomlValue {
+    var ch = peek(c)
+    if (ch == "\"") {
+        return TomlValue { kind: "string", text: basicString(c), items: [], fields: {} }
+    }
+    if (ch == "'") {
+        return TomlValue { kind: "string", text: literalString(c), items: [], fields: {} }
+    }
+    var word = ""
+    while (isBare(peek(c)) || peek(c) == "." || peek(c) == "+") {
+        word = word + peek(c)
+        c.i += 1
+    }
+    if (word == "true" || word == "false") {
+        return TomlValue { kind: "bool", text: word, items: [], fields: {} }
+    }
+    if (word != "" && (isDigit(substring(word, 0, 1)) || startsWith(word, "-") || startsWith(word, "+"))) {
+        return TomlValue { kind: "number", text: word, items: [], fields: {} }
+    }
+    if (word == "") {
+        fail(c, "expected a value")
+    } else {
+        fail(c, "`${word}` is not a value; put text in quotes, like \"${word}\"")
+    }
+    return TomlValue { kind: "string", text: word, items: [], fields: {} }
+}
+
+priv fun value(c: Cursor): TomlValue {
+    var ch = peek(c)
+    if (ch == "[") {
+        c.i += 1
+        var items: [string] = []
+        while (c.error == "") {
+            blank(c)
+            if (peek(c) == "]") {
+                c.i += 1
+                break
+            }
+            var v = scalar(c)
+            items.push(v.text)
+            blank(c)
+            if (peek(c) == ",") {
+                c.i += 1
+            } else if (peek(c) != "]") {
+                fail(c, "expected `,` or `]` in the list")
+            }
+        }
+        return TomlValue { kind: "array", text: "", items: items, fields: {} }
+    }
+    if (ch == "{") {
+        c.i += 1
+        var fields: {string: string} = {}
+        while (c.error == "") {
+            spaces(c)
+            if (peek(c) == "}") {
+                c.i += 1
+                break
+            }
+            var k = key(c)
+            spaces(c)
+            if (peek(c) != "=") {
+                fail(c, "expected `=` after `${k}`")
+                break
+            }
+            c.i += 1
+            spaces(c)
+            fields[k] = scalar(c).text
+            spaces(c)
+            if (peek(c) == ",") {
+                c.i += 1
+            } else if (peek(c) != "}") {
+                fail(c, "expected `,` or `}` in the table")
+            }
+        }
+        return TomlValue { kind: "table", text: "", items: [], fields: fields }
+    }
+    return scalar(c)
+}
+
+pub fun tomlParse(text: string): TomlDoc {
+    var c = Cursor { cs: chars(text), i: 0, line: 1, error: "" }
+    var doc = TomlDoc { tables: [TomlTable { name: "", isArray: false, entries: [] }], error: "" }
+    var current = doc.tables[0]
+    while (c.error == "") {
+        blank(c)
+        if (c.i >= len(c.cs)) {
+            break
+        }
+        if (peek(c) == "[") {
+            c.i += 1
+            var isArray = peek(c) == "["
+            if (isArray) {
+                c.i += 1
+            }
+            spaces(c)
+            var name = join(keyPath(c), ".")
+            if (peek(c) != "]") {
+                fail(c, "expected `]` after the table name")
+                break
+            }
+            c.i += 1
+            if (isArray) {
+                if (peek(c) != "]") {
+                    fail(c, "expected `]]` after the table name")
+                    break
+                }
+                c.i += 1
+            }
+            endOfLine(c)
+            current = TomlTable { name: name, isArray: isArray, entries: [] }
+            doc.tables.push(current)
+            continue
+        }
+        var line = c.line
+        var k = join(keyPath(c), ".")
+        spaces(c)
+        if (peek(c) != "=") {
+            fail(c, "expected `=` after `${k}`")
+            break
+        }
+        c.i += 1
+        spaces(c)
+        var v = value(c)
+        endOfLine(c)
+        for (e in current.entries) {
+            if (e.key == k) {
+                fail(c, "`${k}` is set twice")
+            }
+        }
+        current.entries.push(TomlEntry { key: k, value: v, line: line })
+    }
+    doc.error = c.error
+    return doc
+}
+
+pub fun tomlTable(doc: TomlDoc, name: string): TomlTable? {
+    for (t in doc.tables) {
+        if (t.name == name && !t.isArray) {
+            return t
+        }
+    }
+    return null
+}
+
+pub fun tomlTables(doc: TomlDoc, name: string): [TomlTable] {
+    var out: [TomlTable] = []
+    for (t in doc.tables) {
+        if (t.name == name && t.isArray) {
+            out.push(t)
+        }
+    }
+    return out
+}
+
+pub fun tomlGet(table: TomlTable?, key: string): TomlValue? {
+    if (table == null) {
+        return null
+    }
+    for (e in table.entries) {
+        if (e.key == key) {
+            return e.value
+        }
+    }
+    return null
+}
+
+pub fun tomlText(table: TomlTable?, key: string, fallback: string): string {
+    return tomlGet(table, key)?.text ?? fallback
+}
+
+pub fun tomlQuote(text: string): string {
+    var out = replace(text, "\\", "\\\\")
+    out = replace(out, "\"", "\\\"")
+    out = replace(out, "\n", "\\n")
+    return "\"" + out + "\""
+}
+
+pub fun tomlList(items: [string]): string {
+    var parts: [string] = []
+    for (s in items) {
+        parts.push(tomlQuote(s))
+    }
+    return "[" + join(parts, ", ") + "]"
+}

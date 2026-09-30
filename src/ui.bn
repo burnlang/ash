@@ -1,0 +1,51 @@
+import "process"
+import "strings"
+
+priv var colorOn = env("NO_COLOR") == "" && env("TERM") != "" && env("TERM") != "dumb" && Process.run("test", ["-t", "1"]) == 0
+
+priv fun paint(code: string, text: string): string {
+    if (!colorOn) {
+        return text
+    }
+    return "\u{1b}[" + code + "m" + text + "\u{1b}[0m"
+}
+
+pub fun bold(text: string): string {
+    return paint("1", text)
+}
+
+pub fun dim(text: string): string {
+    return paint("2", text)
+}
+
+pub fun green(text: string): string {
+    return paint("1;32", text)
+}
+
+pub fun cyan(text: string): string {
+    return paint("36", text)
+}
+
+pub fun yellow(text: string): string {
+    return paint("1;33", text)
+}
+
+pub fun red(text: string): string {
+    return paint("1;31", text)
+}
+
+pub fun step(verb: string, text: string) {
+    print(green(padLeft(verb, 12, " ")) + " " + text)
+}
+
+pub fun warn(text: string) {
+    eprint(yellow("warning:") + " " + text)
+}
+
+pub fun die(message: string, help: string) {
+    eprint(red("error:") + " " + message)
+    if (help != "") {
+        eprint("  " + cyan("= help:") + " " + help)
+    }
+    exit(1)
+}

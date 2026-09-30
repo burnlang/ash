@@ -1,0 +1,143 @@
+import "fs"
+import "process"
+import "paths.bn"
+
+pub def type Remote {
+    string url
+    {string: string} tags
+    {string: string} heads
+    string head
+    string headBranch
+    string error
+}
+
+priv var remotes: {string: Remote} = {}
+
+priv fun git(args: [string]): ProcessOutput {
+    var full = ["GIT_TERMINAL_PROMPT=0", "GIT_ASKPASS=true", "git"]
+    for (a in args) {
+        full.push(a)
+    }
+    return Process.output("env", full)
+}
+
+pub fun hasGit(): bool {
+    return git(["--version"]).code == 0
+}
+
+priv fun firstLine(text: string): string {
+    var t = trim(text)
+    var nl = indexOf(t, "\n")
+    if (nl >= 0) {
+        return substring(t, 0, nl)
+    }
+    return t
+}
+
+pub fun lsRemote(url: string): Remote {
+    var cached = remotes[url]
+    if (cached != null) {
+        return cached
+    }
+    var r = Remote { url: url, tags: {}, heads: {}, head: "", headBranch: "", error: "" }
+    var out = git(["ls-remote", "--symref", url])
+    if (out.code != 0) {
+        var why = firstLine(out.err)
+        if (contains(why, "not found") || contains(why, "could not read Username") || contains(why, "Authentication failed") || contains(why, "terminal prompts disabled")) {
+            why = "the repository does not exist or is private"
+        }
+        r.error = why
+        remotes[url] = r
+        return r
+    }
+    var peeled: {string: string} = {}
+    for (line in split(out.out, "\n")) {
+        var parts = split(line, "\t")
+        if (len(parts) != 2) {
+            continue
+        }
+        var left = parts[0]
+        var ref = trim(parts[1])
+        if (startsWith(left, "ref: ") && ref == "HEAD") {
+            r.headBranch = replace(substring(left, 5), "refs/heads/", "")
+        } else if (ref == "HEAD") {
+            r.head = left
+        } else if (startsWith(ref, "refs/heads/")) {
+            r.heads[substring(ref, 11)] = left
+        } else if (startsWith(ref, "refs/tags/")) {
+            var tag = substring(ref, 10)
+            if (endsWith(tag, "^{}")) {
+                peeled[substring(tag, 0, len(tag) - 3)] = left
+            } else {
+                r.tags[tag] = left
+            }
+        }
+    }
+    for tag, sha in peeled {
+        r.tags[tag] = sha
+    }
+    remotes[url] = r
+    return r
+}
+
+pub fun revOf(dir: string): string {
+    var out = git(["-C", dir, "rev-parse", "HEAD"])
+    if (out.code != 0) {
+        return ""
+    }
+    return trim(out.out)
+}
+
+priv fun cloneRef(url: string, ref: string, rev: string, tmp: string): bool {
+    if (ref == "") {
+        return false
+    }
+    Files.remove(tmp)
+    if (git(["clone", "-q", "--depth", "1", "--branch", ref, url, tmp]).code != 0) {
+        return false
+    }
+    return rev == "" || revOf(tmp) == rev
+}
+
+priv fun fetchRev(url: string, rev: string, tmp: string): bool {
+    Files.remove(tmp)
+    if (git(["init", "-q", tmp]).code != 0) {
+        return false
+    }
+    if (git(["-C", tmp, "fetch", "-q", "--depth", "1", url, rev]).code != 0) {
+        return false
+    }
+    return git(["-C", tmp, "checkout", "-q", "FETCH_HEAD"]).code == 0
+}
+
+priv fun fullClone(url: string, rev: string, tmp: string): string {
+    Files.remove(tmp)
+    var c = git(["clone", "-q", url, tmp])
+    if (c.code != 0) {
+        return firstLine(c.err)
+    }
+    var co = git(["-C", tmp, "checkout", "-q", rev])
+    if (co.code != 0) {
+        return "the commit ${rev} is not in ${url}"
+    }
+    return ""
+}
+
+pub fun download(url: string, ref: string, rev: string, dir: string): string {
+    var tmp = dir + ".partial"
+    Files.makeDir(parentDir(dir))
+    if (!cloneRef(url, ref, rev, tmp) && !fetchRev(url, rev, tmp)) {
+        var err = fullClone(url, rev, tmp)
+        if (err != "") {
+            Files.remove(tmp)
+            return err
+        }
+    }
+    Files.remove(tmp + "/.git")
+    Files.remove(dir)
+    if (!Files.rename(tmp, dir)) {
+        Files.remove(tmp)
+        return "cannot move the download into ${dir}"
+    }
+    return ""
+}
