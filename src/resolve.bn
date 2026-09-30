@@ -218,9 +218,6 @@ pub fun resolve(m: Manifest, lock: [LockEntry], refresh: [string], refreshAll: b
         if (sub.name != w.name) {
             warn("${w.name} calls itself ${sub.name} in its burn.toml")
         }
-        if (sub.kind != "lib") {
-            die("${w.name} is an app, not a library", "install apps as commands with `ash install -g ${w.name}`")
-        }
         if (startsWith(e.source, "path+")) {
             e.version = sub.version
         }

@@ -100,6 +100,20 @@ print(paint("hello"))
 
 Importing a package loads its `main` file. `import "github.com/you/colors/src/extra"` loads another file from it.
 
+Apps can be packages too, whatever their target. Import one as source, or as bytecode to change it with mixins:
+
+```burn
+import "github.com/you/game.bvmc"
+
+@Inject(target: "score", at: "return")
+fun doubled(points: int, result: int): int {
+    return result * 2
+}
+```
+
+`ash install -g` builds an app for its own target: a native executable, a runnable `.bar` archive for
+`target = "bvm"`, or a Node.js script with a small launcher for `target = "js"`.
+
 ## Development
 
 ```sh

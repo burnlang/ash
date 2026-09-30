@@ -141,6 +141,32 @@ expect "$out" "Added example.com/test/mylib"
 grep -q '"example.com/test/mylib" = { path = "../mylib" }' burn.toml || fail "a path dependency was not recorded"
 [ "$(burn run)" = "local hi" ] || fail "the path dependency did not run"
 
+game="$work/repos/game"
+mkdir -p "$game/src"
+printf '[package]\nname = "example.com/test/game"\nversion = "1.0.0"\nkind = "app"\ntarget = "bvm"\n' >"$game/burn.toml"
+printf 'pub fun score(points: int): int {\n    return points * 10\n}\n\nfun main() {\n    print("score", score(3))\n}\n' >"$game/src/main.bn"
+git -C "$game" init -q
+git -C "$game" add -A
+git -C "$game" commit -q -m game
+git -C "$game" tag v1.0.0
+out="$($ASH install example.com/test/game --git "file://$game")"
+expect "$out" "Added example.com/test/game v1.0.0"
+cat >src/main.bn <<'BN'
+import "example.com/test/game.bvmc"
+
+@Inject(target: "score", at: "return")
+fun doubled(points: int, result: int): int {
+    return result * 2
+}
+BN
+[ "$(burn run)" = "score 60" ] || fail "a mixin on an app installed as a package did not apply"
+
+cd "$work"
+$ASH init example.com/test/bvmtool --target bvm >/dev/null
+out="$($ASH install -g ./bvmtool)"
+expect "$out" "(bvm)"
+[ "$("$BURN_HOME/bin/bvmtool")" = "Hello from bvmtool!" ] || fail "the bvm app installed as a command did not run"
+
 cd "$work"
 $ASH init example.com/test/tool >/dev/null
 out="$($ASH install -g ./tool)"

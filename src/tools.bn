@@ -26,8 +26,24 @@ priv fun buildTool(dir: string, m: Manifest): bool {
     }
     var out = binDir() + "/" + shortName(m.name)
     Files.makeDir(binDir())
-    step("Building", "${m.name} ${m.version}")
-    var built = Process.output(burnExe(), ["build", "--target", "native", "-o", out + ".new"])
+    step("Building", "${m.name} ${m.version} (${m.target})")
+    if (m.target == "js") {
+        var script = dir + "/build/" + shortName(m.name) + ".js"
+        var js = Process.output(burnExe(), ["build", "--target", "js", "-o", script])
+        if (js.code != 0) {
+            eprint(js.out + js.err)
+            die("${m.name} does not build", "")
+        }
+        if (!writeFile(out, "#!/bin/sh\nexec node " + shellQuote(script) + " \"$@\"\n")) {
+            return false
+        }
+        return Process.run("chmod", ["+x", out]) == 0
+    }
+    var target = "native"
+    if (m.target == "bvm") {
+        target = "bar"
+    }
+    var built = Process.output(burnExe(), ["build", "--target", target, "-o", out + ".new"])
     if (built.code == 0) {
         return Files.rename(out + ".new", out)
     }
