@@ -17,6 +17,7 @@ jobs:
           cargo build --release --manifest-path "$RUNNER_TEMP/burn/Cargo.toml"
           mkdir -p "$RUNNER_TEMP/bin"
           for tool in burn burni burnc; do ln -sf "$RUNNER_TEMP/burn/target/release/burn" "$RUNNER_TEMP/bin/$tool"; done
+          ln -sf "$RUNNER_TEMP/burn/target/release/bvm" "$RUNNER_TEMP/bin/bvm"
           echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
       - run: burn fmt --check src/*.bn tests/*.bn
       - run: burn check
