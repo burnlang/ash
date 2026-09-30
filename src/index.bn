@@ -263,11 +263,11 @@ pub fun publish(root: string, tagIt: bool) {
     print("")
     step("Ready", "anyone can now run `ash install ${m.name}`")
     print("")
-    print("To list it in `ash search`, add this file to ${indexUrl()}")
-    print(dim("as packages/${m.name}.toml:"))
-    print("")
-    print("name = " + tomlQuote(m.name))
-    print("description = " + tomlQuote(m.description))
-    print("kind = " + tomlQuote(m.kind))
-    print("keywords = []")
+    print("To list it in `ash search`, open an issue with its git URL, https://${m.name}, at")
+    print(cyan(indexUrl() + "/issues/new?template=add-package.yml"))
+    print(dim("The index checks the repository and adds it automatically."))
+    if (m.description == "") {
+        print("")
+        warn("burn.toml has no description; add one to [package], or write it in the issue")
+    }
 }
