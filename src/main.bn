@@ -20,6 +20,7 @@ priv fun help() {
     print("  ash install <name>[@version]    add a package (git repos with a burn.toml)")
     print("  ash remove <name>               remove a package")
     print("  ash update [name]               update to the newest allowed versions")
+    print("  ash sync                        refresh the package index, then install everything in burn.toml")
     print("  ash list                        show the installed packages")
     print("")
     print(bold("Running"))
@@ -190,6 +191,14 @@ fun main() {
         exit(runBurn(a))
     } else if (cmd == "install" || cmd == "i" || cmd == "add") {
         cmdInstall(rest)
+    } else if (cmd == "sync" || cmd == "reload") {
+        requireGit()
+        if (updateIndex()) {
+            step("Updated", "the package index")
+        } else {
+            warn("cannot fetch the package index from ${indexUrl()}")
+        }
+        installAll()
     } else if (cmd == "remove" || cmd == "rm" || cmd == "uninstall") {
         cmdRemove(rest)
     } else if (cmd == "update" || cmd == "up" || cmd == "upgrade") {
