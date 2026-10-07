@@ -176,4 +176,25 @@ expect "$($ASH list -g)" "example.com/test/tool"
 $ASH remove -g example.com/test/tool >/dev/null
 [ ! -e "$BURN_HOME/bin/tool" ] || fail "remove -g left the command"
 
+index="$work/repos/index"
+mkdir -p "$index/packages"
+printf 'name = "example.com/test/colors"\ndescription = "Colors"\n' >"$index/packages/colors.toml"
+git -C "$index" init -q
+git -C "$index" add -A
+git -C "$index" commit -q -m index
+cd "$work"
+$ASH init example.com/test/synced >/dev/null
+cd synced
+$ASH install example.com/test/colors --git "file://$work/repos/colors" >/dev/null
+rm -rf "$BURN_HOME/packages"
+out="$(ASH_INDEX="file://$index" $ASH sync)"
+expect "$out" "Updated the package index"
+expect "$out" "packages ready"
+[ -d "$BURN_HOME/index/packages" ] || fail "sync did not fetch the index"
+printf 'name = "example.com/test/more"\n' >"$index/packages/more.toml"
+git -C "$index" add -A
+git -C "$index" commit -q -m more
+ASH_INDEX="file://$index" $ASH reload >/dev/null
+[ -f "$BURN_HOME/index/packages/more.toml" ] || fail "sync did not refresh an existing index"
+
 printf 'ash end-to-end tests passed\n'
