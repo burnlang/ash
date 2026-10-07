@@ -43,6 +43,7 @@ burn build && cp build/ash ~/.burn/bin/
 | `ash install ../path` | add a local package by path |
 | `ash remove <name>` | remove a package |
 | `ash update [name]` | move packages to the newest versions `burn.toml` allows |
+| `ash sync` | refresh the package index, then install everything in `burn.toml`; editors run it to reload a project |
 | `ash list` | show the installed packages as a tree |
 | `ash run <script> [args]` | run a script from `burn.toml` |
 | `ash <script>` | the same, without `run` |

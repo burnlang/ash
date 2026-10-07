@@ -81,6 +81,10 @@ priv fun walk(dir: string, out: [IndexEntry]) {
     }
 }
 
+pub fun updateIndex(): bool {
+    return refreshIndex(true)
+}
+
 pub fun loadIndex(force: bool): [IndexEntry] {
     var out: [IndexEntry] = []
     if (!refreshIndex(force)) {
