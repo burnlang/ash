@@ -2,6 +2,7 @@ import "github.com/burnlang/ash/src/toml"
 import "github.com/burnlang/ash/src/semver"
 import "github.com/burnlang/ash/src/manifest"
 import "github.com/burnlang/ash/src/paths"
+import "std/testing"
 
 fun allows(spec: string, version: string): bool {
     return specAllows(parseSpec(spec), parseVersion(version))

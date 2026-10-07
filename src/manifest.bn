@@ -2,6 +2,7 @@ import "fs"
 import "toml.bn"
 import "paths.bn"
 import "ui.bn"
+import "std/strings"
 
 pub def type Dep {
     string name
