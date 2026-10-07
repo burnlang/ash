@@ -6,6 +6,7 @@ import "paths.bn"
 import "project.bn"
 import "resolve.bn"
 import "ui.bn"
+import "std/time"
 
 priv fun shortName(name: string): string {
     return baseName(name)
