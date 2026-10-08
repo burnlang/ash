@@ -22,6 +22,7 @@ priv fun help() {
     print("  ash update [name]               update to the newest allowed versions")
     print("  ash sync                        refresh the package index, then install everything in burn.toml")
     print("  ash list                        show the installed packages")
+    print("  -p <member>                     in a workspace, work on one member (install, build, test, ...)")
     print("")
     print(bold("Running"))
     print("  ash run <script> [args]         run a script from burn.toml; `ash <script>` works too")
@@ -138,7 +139,19 @@ priv fun cmdRemove(args: [string]) {
 }
 
 priv fun scriptOr(name: string, rest: [string], fallback: [string]): int {
-    var m = readManifest(projectRoot())
+    var root = projectRoot()
+    if (workspaceOnly(root)) {
+        var args = copy(fallback)
+        if (name == "test") {
+            args = ["test"]
+        }
+        for (a in rest) {
+            args.push(a)
+        }
+        Process.setCwd(root)
+        return runBurn(args)
+    }
+    var m = readManifest(root)
     if (m.scripts[name] != null) {
         return runScript(m, name, rest)
     }
@@ -171,8 +184,50 @@ priv fun cmdFmt(rest: [string]) {
     exit(runBurn(args))
 }
 
+priv fun enterMember(argv: [string]): [string] {
+    var rest: [string] = []
+    var member = ""
+    var skip = false
+    for i, a in argv {
+        if (skip) {
+            skip = false
+            continue
+        }
+        if ((a == "-p" || a == "--package") && i + 1 < len(argv)) {
+            member = argv[i + 1]
+            skip = true
+            continue
+        }
+        rest.push(a)
+    }
+    if (member == "") {
+        return argv
+    }
+    var root = findProjectRoot(".")
+    var ws: Workspace? = null
+    if (root != "") {
+        ws = workspaceOf(root)
+    }
+    if (ws == null) {
+        die("`-p ${member}` picks a member of a workspace, but there is no workspace here", "")
+    }
+    for i, p in ws!!.paths {
+        var dir = ws!!.dirs[i]
+        var name = ""
+        if (Files.isFile(dir + "/burn.toml")) {
+            name = readManifest(dir).name
+        }
+        if (p == member || baseName(dir) == member || name == member || (name != "" && baseName(name) == member)) {
+            Process.setCwd(dir)
+            return rest
+        }
+    }
+    die("the workspace has no member `${member}`", "its members are " + join(ws!!.paths, ", "))
+    return rest
+}
+
 fun main() {
-    var argv = args()
+    var argv = enterMember(args())
     if (len(argv) == 0) {
         help()
         return

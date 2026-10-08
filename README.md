@@ -99,7 +99,20 @@ import "github.com/you/colors"
 print(paint("hello"))
 ```
 
-Importing a package loads its `main` file. `import "github.com/you/colors/src/extra"` loads another file from it.
+Importing a package loads its `main` file. `import "github.com/you/colors/extra"` loads `src/extra.bn` from it.
+
+## Workspaces
+
+In a [workspace](https://github.com/burnlang/burn/blob/master/docs/tooling/packages.mdx#workspaces), ash works on the
+whole workspace at once:
+
+- `ash install`, `ash update`, `ash remove` and `ash sync` keep one `burn.lock` at the workspace root for every member.
+- Run `ash install <name>` inside the member that needs the package, or pick it with `-p`: `ash -p native install github.com/you/colors`.
+- At the root, `ash list` shows every member's packages, and `ash build`, `ash test` and `ash check` work on every member. `-p <member>` picks one.
+
+A member of a workspace can be installed like any other package. `ash install github.com/you/game/common`
+downloads the repository `github.com/you/game` and uses its `common` folder. The members it depends on by `path`
+are pinned to the same commit.
 
 Apps can be packages too, whatever their target. Import one as source, or as bytecode to change it with mixins:
 

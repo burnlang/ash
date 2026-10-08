@@ -24,7 +24,12 @@ priv def type Pending {
 }
 
 pub fun cacheDir(name: string, rev: string): string {
-    return burnHome() + "/packages/" + name + "@" + substring(rev, 0, 12)
+    var dir = burnHome() + "/packages/" + repoOf(name) + "@" + substring(rev, 0, 12)
+    var sub = subOf(name)
+    if (sub != "") {
+        return dir + "/" + sub
+    }
+    return dir
 }
 
 pub fun packageDir(root: string, e: LockEntry): string {
@@ -139,12 +144,19 @@ pub fun ensure(root: string, e: LockEntry, res: Resolution): string {
     if (startsWith(e.rev, ref)) {
         ref = ""
     }
-    step("Downloading", "${e.name} ${e.version}")
-    var err = download(sourceUrl(e), ref, e.rev, dir)
-    if (err != "") {
-        die("cannot download ${e.name}: ${err}", "")
+    var repoDir = cacheDir(repoOf(e.name), e.rev)
+    if (!Files.isDir(repoDir)) {
+        step("Downloading", "${e.name} ${e.version}")
+        var err = download(sourceUrl(e), ref, e.rev, repoDir)
+        if (err != "") {
+            die("cannot download ${e.name}: ${err}", "")
+        }
     }
     if (!Files.isFile(dir + "/burn.toml")) {
+        var sub = subOf(e.name)
+        if (sub != "") {
+            die("${e.name} is not a Burn package: ${repoOf(e.name)} has no burn.toml in ${sub}/", "check the name; a package inside a repository is named after its folder")
+        }
         Files.remove(dir)
         die("${e.name} is not a Burn package: it has no burn.toml", "only git repositories with a burn.toml at the top can be installed")
     }
@@ -176,7 +188,7 @@ pub fun resolve(m: Manifest, lock: [LockEntry], refresh: [string], refreshAll: b
     while (i < len(queue.items)) {
         var w = queue.items[i]
         i += 1
-        if (w.name == m.name) {
+        if (w.name == m.name || contains(m.members, w.name)) {
             continue
         }
         if (wants[w.name] == null) {
@@ -223,10 +235,14 @@ pub fun resolve(m: Manifest, lock: [LockEntry], refresh: [string], refreshAll: b
         }
         e.deps = []
         for (d in sub.deps) {
-            if (d.path != "" && !startsWith(e.source, "path+")) {
-                die("${w.name} depends on ${d.name} by path, which only works inside one machine", "ask its author to publish ${d.name}")
-            }
             e.deps.push(d.name)
+            if (d.path != "" && !startsWith(e.source, "path+")) {
+                if (repoOf(d.name) != repoOf(w.name)) {
+                    die("${w.name} depends on ${d.name} by path, which only works inside one machine", "ask its author to publish ${d.name}")
+                }
+                queue.items.push(Want { name: d.name, spec: "#" + e.rev, url: sourceUrl(e), path: "", from: w.name + " " + e.version })
+                continue
+            }
             queue.items.push(wantsOf(d, dir, m.root, w.name + " " + e.version))
         }
     }
@@ -267,6 +283,9 @@ pub fun fetchLocked(root: string, lock: [LockEntry]): Resolution {
 
 pub fun lockMatches(m: Manifest, lock: [LockEntry]): bool {
     for (d in m.deps) {
+        if (contains(m.members, d.name)) {
+            continue
+        }
         var e = findLocked(lock, d.name)
         if (e == null) {
             return false

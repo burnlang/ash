@@ -176,6 +176,57 @@ expect "$($ASH list -g)" "example.com/test/tool"
 $ASH remove -g example.com/test/tool >/dev/null
 [ ! -e "$BURN_HOME/bin/tool" ] || fail "remove -g left the command"
 
+games="$work/repos/games"
+mkdir -p "$games/common/src" "$games/extra/src"
+printf '[workspace]\nname = "example.com/test/games"\nmembers = ["common", "extra"]\n' >"$games/burn.toml"
+printf '[package]\nname = "example.com/test/games/common"\nversion = "1.0.0"\nkind = "lib"\n' >"$games/common/burn.toml"
+printf 'pub fun base(): int {\n    return 7\n}\n' >"$games/common/src/lib.bn"
+printf '[package]\nname = "example.com/test/games/extra"\nversion = "1.0.0"\nkind = "lib"\n\n[dependencies]\n"example.com/test/games/common" = { path = "../common" }\n' >"$games/extra/burn.toml"
+printf 'import "example.com/test/games/common"\n\npub fun boosted(): int {\n    return base() * 6\n}\n' >"$games/extra/src/lib.bn"
+git -C "$games" init -q
+git -C "$games" add -A
+git -C "$games" commit -q -m games
+git -C "$games" tag v1.0.0
+cd "$work"
+$ASH init example.com/test/player >/dev/null
+cd player
+printf 'import "example.com/test/games/extra"\n\nfun main() {\n    print(boosted())\n}\n' >src/main.bn
+out="$($ASH install example.com/test/games/extra --git "file://$games")"
+expect "$out" "Added example.com/test/games/extra v1.0.0"
+grep -q 'name = "example.com/test/games/common"' burn.lock || fail "the sibling of a sub-package was not locked"
+[ -f "$BURN_HOME/packages/example.com/test/games@$(git -C "$games" rev-parse HEAD | cut -c1-12)/extra/burn.toml" ] || fail "the sub-package was not downloaded inside its repository"
+[ "$(burn run)" = "42" ] || fail "a package from a workspace repository did not run"
+
+cd "$work"
+burn init example.com/test/studio --workspace --targets native,bvm --no-git >/dev/null
+cd studio/native
+out="$($ASH install example.com/test/fmtlib --git "file://$work/repos/fmtlib")"
+expect "$out" "Added example.com/test/fmtlib"
+[ -f ../burn.lock ] || fail "a workspace member wrote its own lock instead of the workspace's"
+[ ! -f burn.lock ] || fail "a workspace member has its own burn.lock"
+grep -q '"example.com/test/fmtlib"' burn.toml || fail "the dependency was not added to the member"
+printf 'import "example.com/test/common"\nimport "example.com/test/fmtlib"\n\nfun main() {\n    print(shout(greeting("native")))\n}\n' >src/main.bn
+sed 's#example.com/test/common#example.com/test/studio/common#' src/main.bn >src/main.new && mv src/main.new src/main.bn
+cd ..
+[ "$(burn run -p native)" = "HELLO FROM NATIVE!!" ] || fail "a workspace member did not use its package"
+rm -rf "$BURN_HOME/packages/example.com/test/fmtlib"*
+out="$($ASH install)"
+expect "$out" "packages ready"
+out="$($ASH list)"
+expect "$out" "example.com/test/studio/common"
+expect "$out" "(workspace member)"
+expect "$out" "example.com/test/fmtlib v0.1.0"
+out="$($ASH test)"
+expect "$out" "1 passed, 0 failed"
+$ASH build -p bvm >/dev/null
+[ -f bvm/build/bvm.bvmc ] || fail "ash build -p did not build the member"
+if $ASH install example.com/test/fmtlib --git "file://$work/repos/fmtlib" 2>"$work/err"; then
+    fail "installing at the workspace root was accepted"
+fi
+expect "$(cat "$work/err")" "root of a workspace"
+out="$($ASH -p native list)"
+expect "$out" "example.com/test/studio/native"
+
 index="$work/repos/index"
 mkdir -p "$index/packages"
 printf 'name = "example.com/test/colors"\ndescription = "Colors"\n' >"$index/packages/colors.toml"

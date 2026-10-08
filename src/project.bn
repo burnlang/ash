@@ -25,6 +25,91 @@ pub fun projectRoot(): string {
     return root
 }
 
+/** What a package command works on: the folder of the burn.lock, and the dependencies to resolve into it. */
+pub def type Scope {
+    string root
+    Manifest manifest
+    Workspace? workspace
+}
+
+/** The workspace that `dir` is the root or a member of. */
+pub fun workspaceOf(dir: string): Workspace? {
+    var here = normPath(absPath(dir))
+    var cur = here
+    while (true) {
+        var w = readWorkspace(cur)
+        if (w != null) {
+            if (normPath(w.root) == here || contains(w.dirs, here)) {
+                return w
+            }
+            return null
+        }
+        if (cur == "/" || cur == ".") {
+            return null
+        }
+        cur = parentDir(cur)
+    }
+}
+
+/** Every member's dependencies as one manifest, so the workspace gets one burn.lock. `changed` replaces the member it belongs to. */
+pub fun combined(ws: Workspace, changed: Manifest?): Manifest {
+    var m = Manifest {
+        root: ws.root,
+        name: ws.name,
+        version: "",
+        kind: "workspace",
+        target: "",
+        main: "",
+        description: "",
+        deps: [],
+        scriptNames: [],
+        scripts: {},
+        members: []
+    }
+    [Manifest] all = []
+    for (dir in ws.dirs) {
+        if (!Files.isFile(dir + "/burn.toml")) {
+            die("the workspace member ${relPath(ws.root, dir)} has no burn.toml", "create it with `burn init` inside the workspace, or remove it from `members`")
+        }
+        var mm = readManifest(dir)
+        if (changed != null && normPath(changed.root) == dir) {
+            mm = changed
+        }
+        all.push(mm)
+        m.members.push(mm.name)
+    }
+    for (mm in all) {
+        for (d in mm.deps) {
+            if (contains(m.members, d.name)) {
+                continue
+            }
+            var dep = Dep { name: d.name, spec: d.spec, git: d.git, path: d.path }
+            if (d.path != "" && !startsWith(d.path, "/")) {
+                dep.path = relPath(ws.root, normPath(mm.root + "/" + d.path))
+            }
+            m.deps.push(dep)
+        }
+    }
+    return m
+}
+
+/** The scope of the project in the current folder; `changed` is its manifest with edits that are not saved yet. */
+pub fun currentScope(changed: Manifest?): Scope {
+    var root = projectRoot()
+    var ws = workspaceOf(root)
+    if (ws == null) {
+        return Scope { root: root, manifest: changed ?? readManifest(root), workspace: null }
+    }
+    return Scope { root: ws.root, manifest: combined(ws, changed), workspace: ws }
+}
+
+priv fun scopeName(s: Scope): string {
+    if (s.workspace != null && s.manifest.name == "") {
+        return "the workspace"
+    }
+    return s.manifest.name
+}
+
 pub fun elapsed(start: int): string {
     var ms = nowMs() - start
     if (ms < 1000) {
@@ -99,12 +184,13 @@ priv fun report(res: Resolution, start: int, verb: string) {
 
 pub fun installAll() {
     var start = nowMs()
-    var root = projectRoot()
-    var m = readManifest(root)
+    var scope = currentScope(null)
+    var root = scope.root
+    var m = scope.manifest
     var lock = readLock(root)
     if (len(m.deps) == 0) {
         writeLock(root, [])
-        step("Finished", "${m.name} has no dependencies")
+        step("Finished", "${scopeName(scope)} has no dependencies")
         return
     }
     if (lockMatches(m, lock)) {
@@ -121,7 +207,6 @@ pub fun installPackages(requests: [Request]) {
     var start = nowMs()
     var root = projectRoot()
     var m = readManifest(root)
-    var lock = readLock(root)
     var refresh: [string] = []
     for (r in requests) {
         if (r.name == m.name) {
@@ -141,7 +226,8 @@ pub fun installPackages(requests: [Request]) {
         }
         refresh.push(r.name)
     }
-    var res = resolve(m, lock, refresh, false)
+    var scope = currentScope(m)
+    var res = resolve(scope.manifest, readLock(scope.root), refresh, false)
     for (r in requests) {
         var spec = r.spec
         for (e in res.entries) {
@@ -151,7 +237,7 @@ pub fun installPackages(requests: [Request]) {
         }
         setDependency(root, r.name, depValue(r, root, spec))
     }
-    writeLock(root, res.entries)
+    writeLock(scope.root, res.entries)
     report(res, start, "Added")
 }
 
@@ -185,23 +271,25 @@ pub fun removePackages(names: [string]) {
         }
     }
     m.deps = kept
-    var res = resolve(m, readLock(root), [], false)
+    var scope = currentScope(m)
+    var res = resolve(scope.manifest, readLock(scope.root), [], false)
     for (n in names) {
         setDependency(root, n, "")
         step("Removed", n)
     }
-    writeLock(root, res.entries)
+    writeLock(scope.root, res.entries)
     step("Finished", "in ${elapsed(start)}")
 }
 
 pub fun updatePackages(names: [string]) {
     var start = nowMs()
-    var root = projectRoot()
-    var m = readManifest(root)
+    var scope = currentScope(null)
+    var root = scope.root
+    var m = scope.manifest
     var lock = readLock(root)
     for (n in names) {
         if (findLocked(lock, n) == null) {
-            die("${n} is not installed in ${m.name}", "see what is installed with `ash list`")
+            die("${n} is not installed in ${scopeName(scope)}", "see what is installed with `ash list`")
         }
     }
     var res = resolve(m, lock, names, len(names) == 0)
@@ -256,9 +344,18 @@ priv fun tree(lock: [LockEntry], name: string, prefix: string, last: bool, seen:
 }
 
 pub fun listPackages() {
-    var root = projectRoot()
-    var m = readManifest(root)
-    var lock = readLock(root)
+    var scope = currentScope(null)
+    var w = scope.workspace
+    if (w != null && normPath(projectRoot()) == normPath(w.root)) {
+        for (dir in w.dirs) {
+            listTree(readManifest(dir), readLock(scope.root), scope.manifest.members)
+        }
+        return
+    }
+    listTree(readManifest(projectRoot()), readLock(scope.root), scope.manifest.members)
+}
+
+priv fun listTree(m: Manifest, lock: [LockEntry], members: [string]) {
     print(bold(m.name) + " " + m.version)
     if (len(m.deps) == 0) {
         print(dim("no dependencies; add one with `ash install <name>`"))
@@ -266,6 +363,14 @@ pub fun listPackages() {
     }
     var seen: [string] = []
     for i, d in m.deps {
+        if (contains(members, d.name)) {
+            var branch = "├── "
+            if (i == len(m.deps) - 1) {
+                branch = "└── "
+            }
+            print(branch + bold(d.name) + dim(" (workspace member)"))
+            continue
+        }
         tree(lock, d.name, "", i == len(m.deps) - 1, seen)
     }
 }
