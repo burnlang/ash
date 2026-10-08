@@ -227,8 +227,8 @@ pub fun publish(root: string, tagIt: bool) {
     if (origin.code != 0) {
         warn("this project has no git remote called origin")
         problems += 1
-    } else if (normalizeRemote(origin.out) != lower(m.name)) {
-        warn("origin is ${trim(origin.out)}, but the package is named ${m.name}; people install it from https://${m.name}")
+    } else if (normalizeRemote(origin.out) != lower(repoOf(m.name))) {
+        warn("origin is ${trim(origin.out)}, but the package is named ${m.name}; people install it from https://${repoOf(m.name)}")
         problems += 1
     }
     var dirty = Process.output("git", ["status", "--porcelain"])

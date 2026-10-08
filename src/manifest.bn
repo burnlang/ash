@@ -22,6 +22,15 @@ pub def type Manifest {
     [Dep] deps
     [string] scriptNames
     {string: string} scripts
+    [string] members
+}
+
+/** A workspace: the folder with the `[workspace]` burn.toml and the folders of its members. */
+pub def type Workspace {
+    string root
+    string name
+    [string] paths
+    [string] dirs
 }
 
 pub def type LockEntry {
@@ -34,7 +43,7 @@ pub def type LockEntry {
 
 pub fun validName(name: string): bool {
     var parts = split(name, "/")
-    if (len(parts) != 3) {
+    if (len(parts) < 3) {
         return false
     }
     var labels = split(parts[0], ".")
@@ -71,11 +80,59 @@ pub fun nameHelp(): string {
     return "package names say where the code lives, like `github.com/owner/project`"
 }
 
+/** The repository a package lives in: its first three parts, so `github.com/you/game/common` is in `github.com/you/game`. */
+pub fun repoOf(name: string): string {
+    var parts = split(name, "/")
+    if (len(parts) <= 3) {
+        return name
+    }
+    return join(slice(parts, 0, 3), "/")
+}
+
+/** The folder of a package inside its repository, empty for a package at the top. */
+pub fun subOf(name: string): string {
+    var parts = split(name, "/")
+    if (len(parts) <= 3) {
+        return ""
+    }
+    return join(slice(parts, 3), "/")
+}
+
 pub fun gitUrl(dep: Dep): string {
     if (dep.git != "") {
         return dep.git
     }
-    return "https://" + dep.name
+    return "https://" + repoOf(dep.name)
+}
+
+/** The workspace whose burn.toml is in `root`, or null when that burn.toml has no `[workspace]`. */
+pub fun readWorkspace(root: string): Workspace? {
+    var file = root + "/burn.toml"
+    if (!Files.isFile(file)) {
+        return null
+    }
+    var doc = tomlParse(readFile(file))
+    check(doc, relPath(".", file))
+    var ws = tomlTable(doc, "workspace")
+    if (ws == null) {
+        return null
+    }
+    var w = Workspace { root: root, name: tomlText(ws, "name", ""), paths: [], dirs: [] }
+    for (p in tomlGet(ws, "members")?.items ?? []) {
+        w.paths.push(p)
+        w.dirs.push(normPath(root + "/" + p))
+    }
+    return w
+}
+
+/** Whether the burn.toml in `root` describes only a workspace, with no package of its own. */
+pub fun workspaceOnly(root: string): bool {
+    var file = root + "/burn.toml"
+    if (!Files.isFile(file)) {
+        return false
+    }
+    var doc = tomlParse(readFile(file))
+    return tomlTable(doc, "workspace") != null && tomlTable(doc, "package") == null
 }
 
 priv fun check(doc: TomlDoc, file: string) {
@@ -88,6 +145,9 @@ pub fun parseManifest(text: string, root: string, file: string): Manifest {
     var doc = tomlParse(text)
     check(doc, file)
     var pkg = tomlTable(doc, "package")
+    if (pkg == null && tomlTable(doc, "workspace") != null) {
+        die("${file} is the root of a workspace, not a package", "run this inside one of its members, or pick one with `-p <member>`")
+    }
     if (pkg == null) {
         die("${file} has no [package] section", "start it with [package] and a `name = \"github.com/you/project\"` line")
     }
@@ -101,7 +161,8 @@ pub fun parseManifest(text: string, root: string, file: string): Manifest {
         description: tomlText(pkg, "description", ""),
         deps: [],
         scriptNames: [],
-        scripts: {}
+        scripts: {},
+        members: []
     }
     if (!validName(m.name)) {
         die("${file}: `${m.name}` is not a valid package name", nameHelp())
