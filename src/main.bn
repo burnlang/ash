@@ -15,7 +15,7 @@ priv fun help() {
     print(bold("ash") + " " + VERSION + " - the Burn package manager")
     print("")
     print(bold("Projects"))
-    print("  ash init <name> [--lib] [--target native|js|bvm]   create a project, like github.com/you/app")
+    print("  ash init <name> [--lib] [--target native|js|bvm|bar]   create a project, like github.com/you/app")
     print("  ash install                     install everything in burn.toml")
     print("  ash install <name>[@version]    add a package (git repos with a burn.toml)")
     print("  ash remove <name>               remove a package")

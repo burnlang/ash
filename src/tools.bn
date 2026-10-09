@@ -41,7 +41,7 @@ priv fun buildTool(dir: string, m: Manifest): bool {
         return Process.run("chmod", ["+x", out]) == 0
     }
     var target = "native"
-    if (m.target == "bvm") {
+    if (m.target == "bvm" || m.target == "bar") {
         target = "bar"
     }
     var built = Process.output(burnExe(), ["build", "--target", target, "-o", out + ".new"])

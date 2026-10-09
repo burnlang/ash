@@ -11,7 +11,7 @@ A package is any git repository with a `burn.toml` at the top. It is named after
 it.
 
 ```sh
-ash init github.com/you/hello        # a new native app (add --lib for a library, --target js|bvm)
+ash init github.com/you/hello        # a new native app (add --lib for a library, --target js|bvm|bar)
 cd hello
 ash install github.com/you/colors    # add a package
 ash start                            # run it
@@ -37,7 +37,7 @@ burn build && cp build/ash ~/.burn/bin/
 
 | Command | What it does |
 | --- | --- |
-| `ash init <name>` | create a project (`--lib`, `--target native\|js\|bvm`) |
+| `ash init <name>` | create a project (`--lib`, `--target native\|js\|bvm\|bar`) |
 | `ash install` | install everything in `burn.toml`, exactly as `burn.lock` pins it |
 | `ash install <name>[@version]` | add a package; `--git <url>` installs from another address |
 | `ash install ../path` | add a local package by path |
@@ -62,7 +62,7 @@ burn build && cp build/ash ~/.burn/bin/
 name = "github.com/you/hello"
 version = "0.1.0"
 kind = "app"            # "app" or "lib"
-target = "native"       # what `burn build` makes: "native", "js" or "bvm"
+target = "native"       # what `burn build` makes: "native", "js", "bvm" or "bar"
 main = "src/main.bn"
 
 [dependencies]
@@ -126,7 +126,7 @@ fun doubled(points: int, result: int): int {
 ```
 
 `ash install -g` builds an app for its own target: a native executable, a runnable `.bar` archive for
-`target = "bvm"`, or a Node.js script with a small launcher for `target = "js"`.
+`target = "bvm"` or `"bar"`, or a Node.js script with a small launcher for `target = "js"`.
 
 ## Development
 
