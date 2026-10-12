@@ -103,7 +103,7 @@ Importing a package loads its `main` file. `import "github.com/you/colors/extra"
 
 ## Workspaces
 
-In a [workspace](https://github.com/burnlang/burn/blob/master/docs/tooling/packages.mdx#workspaces), ash works on the
+In a [workspace](https://burnlang.github.io/docs/tooling/packages#workspaces), ash works on the
 whole workspace at once:
 
 - `ash install`, `ash update`, `ash remove` and `ash sync` keep one `burn.lock` at the workspace root for every member.
