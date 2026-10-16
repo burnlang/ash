@@ -1,0 +1,214 @@
+/**
+ * The interactive `ash init`: asks what a new project should be, shows what it will create, and lets `burn init`
+ * create it. Every question has a default, so Enter (or the end of the input) accepts it.
+ */
+import "fs"
+import "process"
+import "strings"
+import "manifest.bn"
+import "paths.bn"
+import "project.bn"
+import "ui.bn"
+
+/** What the wizard asked for. */
+pub def type InitChoice {
+    string name
+    string kind
+    string target
+    string dir
+    bool git
+}
+
+/** The lowercase letters, digits and dashes of `text`, for a default name. */
+priv fun slug(text: string): string {
+    var out = ""
+    for (ch in chars(lower(trim(text)))) {
+        if (isAlphanumeric(ch) || ch == "-" || ch == "_" || ch == ".") {
+            out += ch
+        } else if (ch == " " && !endsWith(out, "-")) {
+            out += "-"
+        }
+    }
+    while (startsWith(out, "-") || startsWith(out, ".")) {
+        out = substring(out, 1, len(out))
+    }
+    return out
+}
+
+/** The owner a new package is likely published under: `github.user` of git, or the git user name. */
+priv fun defaultOwner(): string {
+    for (key in ["github.user", "user.name"]) {
+        var r = Process.output("git", ["config", "--get", key])
+        if (r.code == 0) {
+            var s = slug(r.out)
+            if (s != "") {
+                return s
+            }
+        }
+    }
+    return "you"
+}
+
+priv fun question(text: string, fallback: string): string {
+    var shown = cyan("?") + " " + bold(text)
+    if (fallback != "") {
+        shown += " " + dim("(" + fallback + ")")
+    }
+    return shown + " "
+}
+
+/** Asks for a line of text; Enter gives `fallback`. */
+priv fun ask(text: string, fallback: string): string {
+    var answer = trim(input(question(text, fallback)))
+    if (answer == "") {
+        return fallback
+    }
+    return answer
+}
+
+/** Asks to pick one of `options` (by number or name); Enter gives `fallback`. */
+priv fun choose(text: string, options: [string], notes: [string], fallback: int): int {
+    print(cyan("?") + " " + bold(text))
+    for i, o in options {
+        var mark = "  "
+        if (i == fallback) {
+            mark = cyan("›") + " "
+        }
+        print("  " + mark + bold("${i + 1}") + " " + padRight(o, 10, " ") + dim(notes[i]))
+    }
+    while (true) {
+        var a = lower(trim(input("  " + dim("1-${len(options)}, Enter for ${options[fallback]}: "))))
+        if (a == "") {
+            return fallback
+        }
+        if (isInt(a) && toInt(a) >= 1 && toInt(a) <= len(options)) {
+            return toInt(a) - 1
+        }
+        for i, o in options {
+            if (a == lower(o)) {
+                return i
+            }
+        }
+        warn("type a number from 1 to ${len(options)}")
+    }
+}
+
+/** Asks a yes or no question; Enter gives `fallback`. */
+priv fun confirm(text: string, fallback: bool): bool {
+    var hint = "Y/n"
+    if (!fallback) {
+        hint = "y/N"
+    }
+    while (true) {
+        var a = lower(trim(input(cyan("?") + " " + bold(text) + " " + dim("(" + hint + ")") + " ")))
+        if (a == "") {
+            return fallback
+        }
+        if (a == "y" || a == "yes") {
+            return true
+        }
+        if (a == "n" || a == "no") {
+            return false
+        }
+        warn("answer y or n")
+    }
+}
+
+/** Asks what the new project should be. */
+pub fun askInit(): InitChoice {
+    print(bold("Create a new Burn project"))
+    print(dim("Press Enter to accept the suggestion in parentheses."))
+    print("")
+    var here = slug(baseName(Process.cwd()))
+    if (here == "") {
+        here = "hello"
+    }
+    var suggestion = "github.com/${defaultOwner()}/${here}"
+    var name = ""
+    while (true) {
+        name = ask("Package name", suggestion)
+        if (validName(name)) {
+            break
+        }
+        warn(nameHelp())
+        suggestion = "github.com/${defaultOwner()}/${slug(baseName(name))}"
+        if (!validName(suggestion)) {
+            suggestion = "github.com/you/hello"
+        }
+    }
+    var kinds = ["app", "lib", "workspace"]
+    var kind = kinds[choose("What do you want to create?", kinds, ["a program you run", "a package others import", "a shared library and one app per target"], 0)]
+    var target = "native"
+    if (kind == "app") {
+        var targets = ["native", "js", "bvm", "bar"]
+        target = targets[choose("What should `ash build` make?", targets, ["an executable for this computer", "a JavaScript file for Node.js", "portable bytecode (.bvmc)", "a runnable archive (.bar)"], 0)]
+    }
+    var dir = ask("Directory", baseName(name))
+    var git = confirm("Create a git repository?", true)
+    return InitChoice { name: name, kind: kind, target: target, dir: dir, git: git }
+}
+
+/** The arguments of `burn init` for `c`. */
+pub fun initArgs(c: InitChoice): [string] {
+    var a = ["init", c.name, c.dir]
+    if (c.kind == "lib") {
+        a.push("--lib")
+    } else if (c.kind == "workspace") {
+        a.push("--workspace")
+    } else if (c.target != "native") {
+        a.push("--target")
+        a.push(c.target)
+    }
+    if (!c.git) {
+        a.push("--no-git")
+    }
+    return a
+}
+
+/** `ash init` without a name: asks, shows the plan, creates the project and says what to do next. */
+pub fun runWizard(): int {
+    var c = askInit()
+    print("")
+    print(bold("This will create"))
+    print("  " + dim(padRight("package", 10, " ")) + c.name)
+    var what = c.kind
+    if (c.kind == "app") {
+        what = "app, built as ${c.target}"
+    }
+    print("  " + dim(padRight("kind", 10, " ")) + what)
+    print("  " + dim(padRight("in", 10, " ")) + c.dir + "/")
+    if (c.git) {
+        print("  " + dim(padRight("git", 10, " ")) + "a new repository")
+    }
+    print("")
+    if (Files.isFile(c.dir + "/burn.toml")) {
+        die(c.dir + " already has a burn.toml", "pick another directory, or edit the existing burn.toml")
+    }
+    if (!confirm("Create it?", true)) {
+        print("Nothing was created.")
+        return 0
+    }
+    var r = Process.output(burnExe(), initArgs(c))
+    if (r.code == -1) {
+        die("the `burn` command was not found", "install the Burn toolchain with burnup, or set BURN to the burn binary")
+    }
+    if (r.code != 0) {
+        eprint(trim(r.err + r.out))
+        return r.code
+    }
+    print("")
+    step("Created", "${c.name} in ${c.dir}/")
+    print("")
+    print(bold("Next steps"))
+    print("  " + cyan("cd " + c.dir))
+    if (c.kind == "lib") {
+        print("  " + cyan("ash test") + dim("      run the tests"))
+        print("  " + cyan("ash publish") + dim("   check that others can install it"))
+    } else {
+        print("  " + cyan("ash start") + dim("     run it"))
+        print("  " + cyan("ash build") + dim("     build it into build/"))
+        print("  " + cyan("ash test") + dim("      run the tests"))
+    }
+    print("  " + cyan("ash install") + dim(" <name>   add a package"))
+    return 0
+}

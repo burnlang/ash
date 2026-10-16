@@ -11,7 +11,8 @@ A package is any git repository with a `burn.toml` at the top. It is named after
 it.
 
 ```sh
-ash init github.com/you/hello        # a new native app (add --lib for a library, --target js|bvm|bar)
+ash init                             # create a project step by step: name, app or library, target, git
+ash init github.com/you/hello        # or in one go: a new native app (add --lib for a library, --target js|bvm|bar)
 cd hello
 ash install github.com/you/colors    # add a package
 ash start                            # run it
@@ -37,7 +38,8 @@ burn build && cp build/ash ~/.burn/bin/
 
 | Command | What it does |
 | --- | --- |
-| `ash init <name>` | create a project (`--lib`, `--target native\|js\|bvm\|bar`) |
+| `ash init` | create a project step by step, with a suggestion for every answer (`-i` asks even with piped input) |
+| `ash init <name>` | create a project in one go (`--lib`, `--target native\|js\|bvm\|bar`) |
 | `ash install` | install everything in `burn.toml`, exactly as `burn.lock` pins it |
 | `ash install <name>[@version]` | add a package; `--git <url>` installs from another address |
 | `ash install ../path` | add a local package by path |
