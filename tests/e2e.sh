@@ -66,6 +66,14 @@ kind = "lib"
 ' v2.0.0
 
 cd "$work"
+out=$(printf 'nope\nexample.com/test/wizlib\n2\nwizdir\nn\ny\n' | $ASH init --interactive 2>&1)
+expect "$out" "package names say where the code lives"
+expect "$out" "Created example.com/test/wizlib in wizdir/"
+grep -q 'kind = "lib"' wizdir/burn.toml || fail "the wizard did not create a library"
+[ ! -d wizdir/.git ] || fail "the wizard created a git repository after being told not to"
+out=$(printf 'example.com/test/declined\n\n\n\n\nn\n' | $ASH init -i)
+expect "$out" "Nothing was created."
+[ ! -d declined ] || fail "the wizard created a project after being told not to"
 $ASH init example.com/test/app >/dev/null
 cd app
 cat >src/main.bn <<'BN'

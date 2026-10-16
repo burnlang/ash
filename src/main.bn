@@ -8,6 +8,7 @@ import "paths.bn"
 import "project.bn"
 import "tools.bn"
 import "ui.bn"
+import "wizard.bn"
 
 const VERSION = "0.1.0"
 
@@ -15,6 +16,7 @@ priv fun help() {
     print(bold("ash") + " " + VERSION + " - the Burn package manager")
     print("")
     print(bold("Projects"))
+    print("  ash init                        create a project step by step")
     print("  ash init <name> [--lib] [--target native|js|bvm|bar]   create a project, like github.com/you/app")
     print("  ash install                     install everything in burn.toml")
     print("  ash install <name>[@version]    add a package (git repos with a burn.toml)")
@@ -239,6 +241,11 @@ fun main() {
     } else if (cmd == "-v" || cmd == "--version" || cmd == "version") {
         print("ash " + VERSION)
     } else if (cmd == "init" || cmd == "new") {
+        var interactive = contains(rest, "-i") || contains(rest, "--interactive")
+        var named = len(positional(takeFlags(rest, ["-i", "--interactive"]), ["--target", "-t", "--targets"])) > 0
+        if (interactive || (!named && !contains(rest, "-h") && !contains(rest, "--help") && Process.run("test", ["-t", "0"]) == 0)) {
+            exit(runWizard())
+        }
         var a = ["init"]
         for (x in rest) {
             a.push(x)
